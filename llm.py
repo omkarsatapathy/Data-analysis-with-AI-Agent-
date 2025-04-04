@@ -153,6 +153,29 @@ class MessageHandler:
             return matches[0].strip()
         return None
     
+
+    @staticmethod
+    def is_asking_for_duplicate_detection(text: str) -> bool:
+        """
+        Check if the user is asking to detect duplicate records.
+        
+        Args:
+            text (str): The user's message.
+            
+        Returns:
+            bool: True if the user is asking for duplicate detection, False otherwise.
+        """
+        duplicate_keywords = [
+            "find duplicate", "detect duplicate", "identify duplicate", 
+            "duplicate record", "duplicate entry", "duplicate data",
+            "similar record", "similar entry", "find similar", 
+            "record deduplication", "deduplicate", "how many duplicate",
+            "check for duplicate", "duplicate check"
+        ]
+        
+        text_lower = text.lower()
+        return any(keyword in text_lower for keyword in duplicate_keywords)
+
     @staticmethod
     def clean_response(response: str) -> str:
         """

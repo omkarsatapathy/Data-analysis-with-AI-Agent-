@@ -46,6 +46,16 @@ class AppSessionState:
         if "openai_api_key" not in st.session_state:
             st.session_state.openai_api_key = os.environ.get("OPENAI_API_KEY", "")
         
+        # Duplicate detection states
+        if "duplicate_results" not in st.session_state:
+            st.session_state.duplicate_results = None
+        if "duplicate_summary" not in st.session_state:
+            st.session_state.duplicate_summary = None
+        if "show_duplicate_preview" not in st.session_state:
+            st.session_state.show_duplicate_preview = False
+        if "show_duplicate_settings" not in st.session_state:
+            st.session_state.show_duplicate_settings = False
+
         # UI control states
         if "show_file_input" not in st.session_state:
             st.session_state.show_file_input = False
@@ -133,6 +143,110 @@ class AppUIManager:
             page_icon="🤖",
             layout="wide"
         )
+
+    @staticmethod
+    def render_duplicate_settings():
+        """Render the duplicate detection settings interface."""
+        if st.session_state.show_duplicate_settings:
+            st.subheader("Duplicate Detection Settings")
+            
+            # Get active DataFrame
+            df = None
+            if st.session_state.active_file_id and st.session_state.active_file_id in st.session_state.uploaded_files:
+                df = st.session_state.uploaded_files[st.session_state.active_file_id]['content']
+            elif st.session_state.file_content is not None:
+                df = st.session_state.file_content
+            
+            if df is not None:
+                # Let user select name columns
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    first_name_col = st.selectbox(
+                        "First Name Column:",
+                        options=[col for col in df.columns if 'name' in col.lower() or 'first' in col.lower()],
+                        key="first_name_col",
+                        index=0 if any('first' in col.lower() for col in df.columns) else 0
+                    )
+                
+                with col2:
+                    last_name_col = st.selectbox(
+                        "Last Name Column:",
+                        options=[col for col in df.columns if 'name' in col.lower() or 'last' in col.lower()],
+                        key="last_name_col",
+                        index=0 if any('last' in col.lower() for col in df.columns) else 0
+                    )
+                
+                # Let user select similarity threshold
+                threshold = st.select_slider(
+                    "Similarity Threshold:",
+                    options=["low", "medium", "high", "exact"],
+                    value="medium",
+                    key="similarity_threshold"
+                )
+                
+                # Explanation of thresholds
+                threshold_explanations = {
+                    "low": "More potential matches, higher chance of false positives",
+                    "medium": "Balanced approach, good for most datasets",
+                    "high": "Fewer matches, lower chance of false positives",
+                    "exact": "Only exact matches, no fuzzy matching"
+                }
+                
+                st.info(f"**{threshold.capitalize()}**: {threshold_explanations[threshold]}")
+                
+                # Execute button
+                detect_button = st.button("Detect Duplicates", key="detect_duplicates_button")
+                
+                return first_name_col, last_name_col, threshold, detect_button
+            else:
+                st.warning("No data loaded. Please upload a file first.")
+        
+        return None, None, None, False
+    
+    @staticmethod
+    def render_duplicate_preview():
+        """Render the duplicate detection results preview."""
+        if st.session_state.show_duplicate_preview and st.session_state.duplicate_results is not None:
+            st.subheader("Duplicate Records")
+            
+            # Show summary metrics
+            if st.session_state.duplicate_summary:
+                summary = st.session_state.duplicate_summary
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Total Duplicate Groups", summary['duplicate_groups'])
+                
+                with col2:
+                    st.metric("Total Duplicate Records", summary['total_duplicates'])
+                
+                with col3:
+                    st.metric("Percentage of Dataset", f"{summary['percent_duplicates']}%")
+            
+            # Show duplicate records grouped by duplicate_group
+            duplicate_df = st.session_state.duplicate_results
+            
+            # Show each group in an expander
+            for group_id in sorted(duplicate_df['duplicate_group'].unique()):
+                group_df = duplicate_df[duplicate_df['duplicate_group'] == group_id]
+                
+                with st.expander(f"Group {int(group_id)} ({len(group_df)} records)"):
+                    st.dataframe(group_df)
+            
+            # Option to export results
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("Export Duplicate Records", key="export_duplicates"):
+                    st.session_state.filtered_df = duplicate_df
+                    st.session_state.show_export_input = True
+                    st.rerun()
+            
+            with col2:
+                if st.button("Close Preview", key="close_duplicate_preview"):
+                    st.session_state.show_duplicate_preview = False
+                    st.rerun()
     
     @staticmethod
     def render_sidebar(openai_handler: OpenAIHandler):
@@ -1225,6 +1339,50 @@ class AppController:
         AppSessionState.add_assistant_message(f"{report_title}{quality_report}")
         st.rerun()
     
+    def handle_duplicate_detection(self, df: pd.DataFrame, first_name_col: str, last_name_col: str, threshold: str = 'medium'):
+        """
+        Handle duplicate record detection request.
+        
+        Args:
+            df (DataFrame): DataFrame to check for duplicates
+            first_name_col (str): Column name for first names
+            last_name_col (str): Column name for last names
+            threshold (str): Similarity threshold level
+        """
+        # Import the duplicate detector
+        from duplicate_detector import DuplicateDetector
+        
+        # Create detector instance
+        detector = DuplicateDetector()
+        
+        # Perform duplicate detection
+        with st.spinner("Detecting duplicate records..."):
+            duplicate_df, summary = detector.detect_name_duplicates(
+                df, 
+                first_name_col, 
+                last_name_col, 
+                threshold=threshold
+            )
+            
+            # Generate report
+            report = detector.generate_duplicate_report(duplicate_df, summary)
+            
+            # Store the results
+            st.session_state.duplicate_results = duplicate_df
+            st.session_state.duplicate_summary = summary
+            
+            # Add to conversation
+            AppSessionState.add_assistant_message(
+                f"I've analyzed the data for duplicate records based on name similarity.\n\n{report}"
+            )
+            
+            # If we have duplicates, show them in a data preview
+            if not duplicate_df.empty:
+                st.session_state.show_duplicate_preview = True
+            
+            st.rerun()
+
+
     def handle_pdf_question(self, question: str):
         """
         Handle question about PDF content.
@@ -1298,6 +1456,31 @@ class AppController:
                 st.rerun()
                 return
         
+        # Check if user is asking for duplicate detection
+        elif MessageHandler.is_asking_for_duplicate_detection(user_input):
+            # Show duplicate detection settings UI
+            st.session_state.show_duplicate_settings = True
+            
+            # Check if we have any files loaded
+            if st.session_state.file_content is not None or (
+                st.session_state.active_file_id and 
+                st.session_state.active_file_id in st.session_state.uploaded_files
+            ):
+                # Add AI response
+                AppSessionState.add_assistant_message(
+                    "I can help you detect duplicate records based on name similarity. "
+                    "Please select the name columns and detection settings below."
+                )
+            else:
+                # No file loaded
+                AppSessionState.add_assistant_message(
+                    "No file is currently loaded. Please load a file first before "
+                    "requesting duplicate record detection."
+                )
+            
+            st.rerun()
+            return
+
         # Check if user is asking for DataFrame operations
         elif MessageHandler.is_asking_for_dataframe_operations(user_input):
             # Show DataFrame operations UI
@@ -1642,6 +1825,17 @@ class AppController:
             if export_button and export_path and export_format:
                 self.handle_export_request(export_path, export_format)
             
+
+            # Handle duplicate detection settings
+            first_name_col, last_name_col, threshold, detect_button = AppUIManager.render_duplicate_settings()
+            if detect_button and first_name_col and last_name_col:
+                if st.session_state.active_file_id and st.session_state.active_file_id in st.session_state.uploaded_files:
+                    df = st.session_state.uploaded_files[st.session_state.active_file_id]['content']
+                    self.handle_duplicate_detection(df, first_name_col, last_name_col, threshold)
+                elif st.session_state.file_content is not None:
+                    self.handle_duplicate_detection(st.session_state.file_content, first_name_col, last_name_col, threshold)
+
+
             # Handle message form
             user_input, submit_button = AppUIManager.render_message_form()
             if submit_button:
@@ -1706,4 +1900,7 @@ class AppController:
                         st.error(f"Failed to process PDF: {message}")
             
             # Render code execution results
+            # Render duplicate detection results if available
+            if st.session_state.show_duplicate_preview:
+                AppUIManager.render_duplicate_preview()
             AppUIManager.render_code_execution_results()
