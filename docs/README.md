@@ -76,7 +76,7 @@ project_root/
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/agentic-ai-data-analyst.git
+   git clone https://github.com/omkarsatapathy/Data-analysis-with-AI-Agent-.git
    cd agentic-ai-data-analyst
    ```
 
@@ -84,15 +84,10 @@ project_root/
    ```bash
    pip install -r docs/requirement.txt
    ```
-
-3. Set up your OpenAI API key:
-   ```bash
-   export OPENAI_API_KEY="your-api-key-here"
-   ```
    
    Or provide it through the application interface.
 
-4. Run the application:
+3. Run the application:
    ```bash
    streamlit run main.py
    ```
