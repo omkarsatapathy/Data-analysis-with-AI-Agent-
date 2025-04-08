@@ -1,5 +1,5 @@
 import streamlit as st
-from streamlit_config import AppController
+from config.streamlit_config import AppController
 
 def main():
     """

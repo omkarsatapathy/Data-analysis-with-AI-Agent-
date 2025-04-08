@@ -3,7 +3,7 @@ import re
 import requests
 from typing import Tuple, Optional, Dict, Any
 import traceback
-from llm import OpenAIHandler
+from src.llm import OpenAIHandler
 
 
 class PDFDownloader:

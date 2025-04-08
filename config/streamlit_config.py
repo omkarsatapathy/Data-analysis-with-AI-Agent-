@@ -4,12 +4,13 @@ import uuid
 import os
 from typing import Dict, List, Tuple, Any, Optional, Callable
 import re
-from llm import MessageHandler, OpenAIHandler
-from data_operation import DataFrameOperations, DataAnalyzer
-from pdf_fetcher import PDFDownloader, AnnualReportAgent, PDFRequestParser
-from rag_app import RAGSystem, DocumentQASession
-from file_export import FileHandler, FileExporter
-from python_engine import CodeExecutor
+from src.llm import MessageHandler, OpenAIHandler
+from src.duplicate_detector import DuplicateDetector
+from src.data_operation import DataFrameOperations, DataAnalyzer
+from src.pdf_fetcher import PDFDownloader, AnnualReportAgent, PDFRequestParser
+from src.rag_app import RAGSystem, DocumentQASession
+from src.file_export import FileHandler, FileExporter
+from src.python_engine import CodeExecutor
 import datetime
 
 
@@ -1393,8 +1394,8 @@ class AppController:
             threshold (str): Similarity threshold level
             convert_to_string (bool): Whether to convert columns to string
         """
-        # Import the duplicate detector
-        from duplicate_detector import DuplicateDetector
+        # # Import the duplicate detector
+        # from duplicate_detector import DuplicateDetector
         
         # Create detector instance
         detector = DuplicateDetector()

@@ -1,6 +1,6 @@
-# import unittest
-# import pandas as pd
-# from duplicate_detector import DuplicateDetector
+import unittest
+import pandas as pd
+from src.duplicate_detector import DuplicateDetector
 
 
 # class TestDuplicateDetector(unittest.TestCase):
