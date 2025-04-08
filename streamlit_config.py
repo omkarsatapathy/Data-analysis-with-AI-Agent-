@@ -10,6 +10,7 @@ from pdf_fetcher import PDFDownloader, AnnualReportAgent, PDFRequestParser
 from rag_app import RAGSystem, DocumentQASession
 from file_export import FileHandler, FileExporter
 from python_engine import CodeExecutor
+import datetime
 
 
 class AppSessionState:
@@ -41,6 +42,10 @@ class AppSessionState:
             st.session_state.uploaded_files = {}  # dict to store multiple files {id: {name, content, type}}
         if "active_file_id" not in st.session_state:
             st.session_state.active_file_id = None  # currently selected file
+        
+        # Generated files support
+        if "generated_files" not in st.session_state:
+            st.session_state.generated_files = {}  # dict to store generated files {id: {name, path, type}}
         
         # API key state
         if "openai_api_key" not in st.session_state:
@@ -144,66 +149,6 @@ class AppUIManager:
             layout="wide"
         )
 
-    @staticmethod
-    def render_duplicate_settings():
-        """Render the duplicate detection settings interface."""
-        if st.session_state.show_duplicate_settings:
-            st.subheader("Duplicate Detection Settings")
-            
-            # Get active DataFrame
-            df = None
-            if st.session_state.active_file_id and st.session_state.active_file_id in st.session_state.uploaded_files:
-                df = st.session_state.uploaded_files[st.session_state.active_file_id]['content']
-            elif st.session_state.file_content is not None:
-                df = st.session_state.file_content
-            
-            if df is not None:
-                # Let user select name columns
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    first_name_col = st.selectbox(
-                        "First Name Column:",
-                        options=[col for col in df.columns if 'name' in col.lower() or 'first' in col.lower()],
-                        key="first_name_col",
-                        index=0 if any('first' in col.lower() for col in df.columns) else 0
-                    )
-                
-                with col2:
-                    last_name_col = st.selectbox(
-                        "Last Name Column:",
-                        options=[col for col in df.columns if 'name' in col.lower() or 'last' in col.lower()],
-                        key="last_name_col",
-                        index=0 if any('last' in col.lower() for col in df.columns) else 0
-                    )
-                
-                # Let user select similarity threshold
-                threshold = st.select_slider(
-                    "Similarity Threshold:",
-                    options=["low", "medium", "high", "exact"],
-                    value="medium",
-                    key="similarity_threshold"
-                )
-                
-                # Explanation of thresholds
-                threshold_explanations = {
-                    "low": "More potential matches, higher chance of false positives",
-                    "medium": "Balanced approach, good for most datasets",
-                    "high": "Fewer matches, lower chance of false positives",
-                    "exact": "Only exact matches, no fuzzy matching"
-                }
-                
-                st.info(f"**{threshold.capitalize()}**: {threshold_explanations[threshold]}")
-                
-                # Execute button
-                detect_button = st.button("Detect Duplicates", key="detect_duplicates_button")
-                
-                return first_name_col, last_name_col, threshold, detect_button
-            else:
-                st.warning("No data loaded. Please upload a file first.")
-        
-        return None, None, None, False
-    
     @staticmethod
     def render_duplicate_settings():
         """Render the duplicate detection settings interface."""
@@ -330,6 +275,17 @@ class AppUIManager:
                     st.rerun()
             else:
                 st.warning("No CSV files loaded yet!")
+            
+            # Generated files section
+            if st.session_state.generated_files:
+                st.subheader("Generated Files")
+                # Display all generated files
+                for file_id, file_info in st.session_state.generated_files.items():
+                    st.markdown(f"- {file_info['name']} ({file_info['type']})")
+                
+                if st.button("Clear all generated files", key="clear_all_generated_files"):
+                    st.session_state.generated_files = {}
+                    st.rerun()
             
             # Annual report information
             if st.session_state.annual_report_path:
@@ -1000,47 +956,55 @@ class AppUIManager:
     
     @staticmethod
     def render_duplicate_preview():
-            """Render the duplicate detection results preview."""
-            if st.session_state.show_duplicate_preview and st.session_state.duplicate_results is not None:
-                st.subheader("Duplicate Records")
-                
-                # Show summary metrics
-                if st.session_state.duplicate_summary:
-                    summary = st.session_state.duplicate_summary
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric("Total Duplicate Groups", summary['duplicate_groups'])
-                    
-                    with col2:
-                        st.metric("Total Duplicate Records", summary['total_duplicates'])
-                    
-                    with col3:
-                        st.metric("Percentage of Dataset", f"{summary['percent_duplicates']}%")
-                
-                # Show duplicate records grouped by duplicate_group
-                duplicate_df = st.session_state.duplicate_results
-                
-                # Show each group in an expander
-                for group_id in sorted(duplicate_df['duplicate_group'].unique()):
-                    group_df = duplicate_df[duplicate_df['duplicate_group'] == group_id]
-                    
-                    with st.expander(f"Group {int(group_id)} ({len(group_df)} records)"):
-                        st.dataframe(group_df)
-                
-                # Option to export results
-                col1, col2 = st.columns(2)
+        """Render the duplicate detection results preview."""
+        if st.session_state.show_duplicate_preview and st.session_state.duplicate_results is not None:
+            st.subheader("Duplicate Records")
+            
+            # Show summary metrics
+            if st.session_state.duplicate_summary:
+                summary = st.session_state.duplicate_summary
+                col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    if st.button("Export Duplicate Records", key="export_duplicates"):
-                        st.session_state.filtered_df = duplicate_df
-                        st.session_state.show_export_input = True
-                        st.rerun()
+                    st.metric("Total Duplicate Groups", summary['duplicate_groups'])
                 
                 with col2:
-                    if st.button("Close Preview", key="close_duplicate_preview"):
-                        st.session_state.show_duplicate_preview = False
-                        st.rerun()
+                    st.metric("Total Duplicate Records", summary['total_duplicates'])
+                
+                with col3:
+                    st.metric("Percentage of Dataset", f"{summary['percent_duplicates']}%")
+            
+            # Show each group in an expander
+            duplicate_df = st.session_state.duplicate_results
+            for group_id in sorted(duplicate_df['duplicate_group'].unique()):
+                group_df = duplicate_df[duplicate_df['duplicate_group'] == group_id]
+                
+                with st.expander(f"Group {int(group_id)} ({len(group_df)} records)"):
+                    st.dataframe(group_df)
+            
+            # Add download button
+            if st.button("Download Duplicate Records", key="download_duplicates"):
+                # Generate a filename with timestamp
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"/Users/omkar/Downloads/duplicate_records_{timestamp}.csv"
+                
+                # Save to CSV
+                duplicate_df.to_csv(filename, index=False)
+                
+                # Add to generated files
+                file_id = str(uuid.uuid4())
+                st.session_state.generated_files[file_id] = {
+                    'name': f"duplicate_records_{timestamp}.csv",
+                    'path': filename,
+                    'type': 'csv'
+                }
+                
+                st.success(f"File saved to {filename}")
+            
+            # Option to close preview
+            if st.button("Close Preview", key="close_duplicate_preview"):
+                st.session_state.show_duplicate_preview = False
+                st.rerun()
 
     @staticmethod
     def render_code_execution_results():
@@ -1381,6 +1345,14 @@ class AppController:
                 # Add success message to conversation
                 AppSessionState.add_assistant_message(message)
                 
+                # Add to generated files
+                file_id = str(uuid.uuid4())
+                st.session_state.generated_files[file_id] = {
+                    'name': os.path.basename(export_path),
+                    'path': export_path,
+                    'type': export_format
+                }
+                
                 # Hide export input
                 st.session_state.show_export_input = False
                 st.session_state.filtered_df = None
@@ -1453,16 +1425,21 @@ class AppController:
             st.session_state.duplicate_summary = summary
             
             # Add to conversation
-            AppSessionState.add_assistant_message(
-                f"I've analyzed the data for duplicate records based on column similarity.\n\n{report}"
-            )
-            
-            # If we have duplicates, show them in a data preview
             if not duplicate_df.empty:
+                AppSessionState.add_assistant_message(
+                    f"I've analyzed the data for duplicate records based on columns '{first_col}' and '{second_col}'.\n\n"
+                    f"Found {summary['total_duplicates']} potential duplicate records in {summary['duplicate_groups']} groups.\n\n"
+                    f"You can view the summary and download the results from the panel on the right."
+                )
+                
+                # Show preview with download button
                 st.session_state.show_duplicate_preview = True
+            else:
+                AppSessionState.add_assistant_message(
+                    f"I've analyzed the data for duplicate records based on columns '{first_col}' and '{second_col}', but no duplicates were found."
+                )
             
             st.rerun()
-
 
     def handle_pdf_question(self, question: str):
         """
@@ -1490,52 +1467,7 @@ class AppController:
             AppSessionState.add_assistant_message(answer)
         
         st.rerun()
-
-
-    @staticmethod
-    def render_duplicate_preview():
-        """Render the duplicate detection results preview."""
-        if st.session_state.show_duplicate_preview and st.session_state.duplicate_results is not None:
-            st.subheader("Duplicate Records")
-            
-            # Show summary metrics
-            if st.session_state.duplicate_summary:
-                summary = st.session_state.duplicate_summary
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.metric("Total Duplicate Groups", summary['duplicate_groups'])
-                
-                with col2:
-                    st.metric("Total Duplicate Records", summary['total_duplicates'])
-                
-                with col3:
-                    st.metric("Percentage of Dataset", f"{summary['percent_duplicates']}%")
-            
-            # Show duplicate records grouped by duplicate_group
-            duplicate_df = st.session_state.duplicate_results
-            
-            # Show each group in an expander
-            for group_id in sorted(duplicate_df['duplicate_group'].unique()):
-                group_df = duplicate_df[duplicate_df['duplicate_group'] == group_id]
-                
-                with st.expander(f"Group {int(group_id)} ({len(group_df)} records)"):
-                    st.dataframe(group_df)
-            
-            # Option to export results
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("Export Duplicate Records", key="export_duplicates"):
-                    st.session_state.filtered_df = duplicate_df
-                    st.session_state.show_export_input = True
-                    st.rerun()
-            
-            with col2:
-                if st.button("Close Preview", key="close_duplicate_preview"):
-                    st.session_state.show_duplicate_preview = False
-                    st.rerun()
-        
+    
     def process_user_message(self, user_input: str):
         """
         Process user message and generate appropriate response.
@@ -1594,8 +1526,8 @@ class AppController:
             ):
                 # Add AI response
                 AppSessionState.add_assistant_message(
-                    "I can help you detect duplicate records based on name similarity. "
-                    "Please select the name columns and detection settings below."
+                    "I can help you detect duplicate records based on column similarity. "
+                    "Please select the columns and detection settings below."
                 )
             else:
                 # No file loaded
@@ -1889,6 +1821,12 @@ class AppController:
                 for file_id, file_info in st.session_state.uploaded_files.items():
                     prompt += f"\n- {file_info['name']} (shape: {file_info['content'].shape})"
             
+            # Include info about generated files
+            if st.session_state.generated_files:
+                prompt += "\n\nGenerated files:"
+                for file_id, file_info in st.session_state.generated_files.items():
+                    prompt += f"\n- {file_info['name']} ({file_info['type']})"
+            
             # Include info about annual report if available
             if st.session_state.annual_report_path and st.session_state.comparison_company:
                 prompt += f"\n\nNote: The user has loaded an annual report for {st.session_state.comparison_company}."
@@ -1951,8 +1889,6 @@ class AppController:
             if export_button and export_path and export_format:
                 self.handle_export_request(export_path, export_format)
             
-
-            # Handle duplicate detection settings
             # Handle duplicate detection settings
             first_col, second_col, threshold, convert_to_string, detect_button = AppUIManager.render_duplicate_settings()
             if detect_button and first_col and second_col:
@@ -1961,8 +1897,7 @@ class AppController:
                     self.handle_duplicate_detection(df, first_col, second_col, threshold, convert_to_string)
                 elif st.session_state.file_content is not None:
                     self.handle_duplicate_detection(st.session_state.file_content, first_col, second_col, threshold, convert_to_string)
-
-
+            
             # Handle message form
             user_input, submit_button = AppUIManager.render_message_form()
             if submit_button:
@@ -2026,8 +1961,9 @@ class AppController:
                     else:
                         st.error(f"Failed to process PDF: {message}")
             
-            # Render code execution results
             # Render duplicate detection results if available
             if st.session_state.show_duplicate_preview:
                 AppUIManager.render_duplicate_preview()
+            
+            # Render code execution results
             AppUIManager.render_code_execution_results()

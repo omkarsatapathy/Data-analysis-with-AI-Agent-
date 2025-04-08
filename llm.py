@@ -153,6 +153,22 @@ class MessageHandler:
             return matches[0].strip()
         return None
     
+    @staticmethod
+    def is_asking_to_load_file(message: str) -> bool:
+        """Check if the user is asking to load a file."""
+        message = message.lower()
+        load_phrases = ["load file", "load my file", "load files", "load my files", 
+                    "upload file", "upload files", "import file", "import data"]
+        
+        # Check for common phrases
+        if any(phrase in message for phrase in load_phrases):
+            return True
+        
+        # Check for 'load' and file-related words
+        if "load" in message and any(word in message for word in ["csv", "excel", "xls", "xlsx", "parquet", "file", "data"]):
+            return True
+            
+        return False
 
     @staticmethod
     def is_asking_for_duplicate_detection(text: str) -> bool:

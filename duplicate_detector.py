@@ -5,6 +5,8 @@ import re
 from fuzzywuzzy import fuzz, process
 import Levenshtein
 from collections import defaultdict
+import os
+import datetime
 
 
 class DuplicateDetector:
@@ -346,6 +348,45 @@ class DuplicateDetector:
         """
         
         return report
+    
+    def export_duplicates_to_csv(
+        self,
+        duplicate_df: pd.DataFrame,
+        custom_path: str = None
+    ) -> str:
+        """
+        Export duplicate records to a CSV file.
+        
+        Args:
+            duplicate_df (DataFrame): DataFrame containing identified duplicates
+            custom_path (str, optional): Custom path to save the CSV file
+            
+        Returns:
+            str: Path to the saved CSV file
+        """
+        if duplicate_df.empty:
+            return None
+        
+        # Create a timestamp for the filename
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Set the default path if not provided
+        if not custom_path:
+            filepath = f"/Users/omkar/Downloads/duplicate_records_{timestamp}.csv"
+        else:
+            # If custom path is a directory, add the filename
+            if os.path.isdir(custom_path):
+                filepath = os.path.join(custom_path, f"duplicate_records_{timestamp}.csv")
+            else:
+                filepath = custom_path
+        
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+        
+        # Save the DataFrame to CSV
+        duplicate_df.to_csv(filepath, index=False)
+        
+        return filepath
     
     def find_potential_matches(
         self, 
