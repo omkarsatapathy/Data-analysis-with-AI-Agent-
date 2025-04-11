@@ -416,3 +416,24 @@ class MessageHandler:
                 return match.group(1).strip()
         
         return None
+        
+    @staticmethod
+    def is_asking_for_column_transformation(text: str) -> bool:
+        """
+        Check if the user is asking for column transformation or renaming.
+        
+        Args:
+            text (str): The user's message.
+            
+        Returns:
+            bool: True if the user is asking for column transformation, False otherwise.
+        """
+        transformation_keywords = [
+            "rename column", "rename columns", "change column name", "change column names",
+            "transform column", "transform columns", "modify column", "modify columns",
+            "column transformation", "column renaming", "update column name", "update column names",
+            "column name mapping", "map column names", "reformat column", "reformat columns"
+        ]
+        
+        text_lower = text.lower()
+        return any(keyword in text_lower for keyword in transformation_keywords)
