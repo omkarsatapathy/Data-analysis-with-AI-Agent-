@@ -1,5 +1,11 @@
 import streamlit as st
-from config.streamlit_config import AppController
+import sys
+import os
+
+# Make sure the directory containing config is in the path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from config.streamlit_config import load_streamlit_config
 
 def main():
     """
@@ -11,7 +17,7 @@ def main():
     operations, analyze PDF documents, and export results.
     """
     # Create and run application controller
-    app = AppController()
+    app = load_streamlit_config()
     app.run()
 
 if __name__ == "__main__":

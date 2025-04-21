@@ -277,6 +277,7 @@ class DuplicateDetector:
                 limit=100  # Limit to avoid excessive matches
             )
             
+            
             if matches:
                 # If matches found, create a new duplicate group
                 duplicate_groups[group_id].append({
