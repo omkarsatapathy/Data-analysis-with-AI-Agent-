@@ -18,81 +18,21 @@ class AppDuplicateDetector:
         if st.session_state.show_duplicate_settings:
             st.subheader("Duplicate Detection Settings")
             
-            if st.session_state.show_duplicate_column_mapping:
-                return None, None, None, False, False, []
+            # Get active DataFrame
+            df = None
+            if st.session_state.active_file_id and st.session_state.active_file_id in st.session_state.uploaded_files:
+                df = st.session_state.uploaded_files[st.session_state.active_file_id]['content']
+            elif st.session_state.file_content is not None:
+                df = st.session_state.file_content
             
-            # Check if any files are loaded
-            if len(st.session_state.uploaded_files) > 0:
-                st.write("### Select Files for Duplicate Detection")
-                
-                # Create a multiselect for files
-                file_options = {file_id: file_info['name'] for file_id, file_info in st.session_state.uploaded_files.items()}
-                
-                selected_file_ids = st.multiselect(
-                    "Select files to check for duplicates:",
-                    options=list(file_options.keys()),
-                    format_func=lambda x: file_options[x],
-                    default=[st.session_state.active_file_id] if st.session_state.active_file_id else [],
-                    key="duplicate_file_selector"
-                )
-                
-                if not selected_file_ids:
-                    st.warning("Please select at least one file for duplicate detection.")
-                    return None, None, None, False, False, []
-                
-                # Get all column names from selected files
-                all_columns = set()
-                column_sets = []
-                
-                for file_id in selected_file_ids:
-                    df = st.session_state.uploaded_files[file_id]['content']
-                    column_set = set(df.columns.tolist())
-                    column_sets.append((file_id, column_set))
-                    all_columns.update(column_set)
-                
-                # Check if all files have the same columns
-                have_same_columns = all(column_sets[0][1] == column_set[1] for column_set in column_sets[1:]) if len(column_sets) > 1 else True
-                
-                if not have_same_columns and len(selected_file_ids) > 1:
-                    st.error("Selected files have different column names. Please use the Column Transformation feature to map them first.")
-                    
-                    # Show column differences
-                    st.write("### Column Differences:")
-                    for file_id, columns in column_sets:
-                        st.write(f"**{file_options[file_id]}**: {', '.join(sorted(list(columns)))}")
-                    
-                    # Option to download mapping template
-                    if st.button("Download Mapping Template", key="download_duplicate_mapping_template"):
-                        # Create mapping template with columns from all files
-                        all_columns_list = sorted(list(all_columns))
-                        template_df = pd.DataFrame({
-                            'old_column_name': all_columns_list,
-                            'new_column_name': all_columns_list  # Default mapping is same name
-                        })
-                        
-                        # Convert to CSV
-                        csv = template_df.to_csv(index=False)
-                        
-                        # Create download button
-                        st.download_button(
-                            label="Download Template CSV",
-                            data=csv,
-                            file_name="column_mapping_template.csv",
-                            mime="text/csv",
-                            key="download_template_csv_duplicate"
-                        )
-                    
-                    # Show transformation button
-                    transform_button = st.button("Go to Column Transformation", key="go_to_column_transform")
-                    if transform_button:
-                        st.session_state.show_column_transform_input = True
-                        st.session_state.show_duplicate_settings = False
-                        st.rerun()
-                    
-                    return None, None, None, False, False, []
-                
-                # Get a reference DataFrame for column selection (use the first file)
-                df = st.session_state.uploaded_files[selected_file_ids[0]]['content']
+            if df is not None:
+                # Display warning if multiple files with potentially different columns
+                if len(st.session_state.uploaded_files) > 1:
+                    st.info("""
+                        **Multiple files detected:** 
+                        When detecting duplicates across multiple files, ensure column names match.
+                        If column names differ, you'll be prompted to provide a mapping.
+                    """)
                 
                 # Let user specify if they want to convert all columns to string
                 convert_to_string = st.checkbox("Convert all columns to string before checking duplicates", value=True)
@@ -124,6 +64,31 @@ class AppDuplicateDetector:
                     if second_col:
                         st.write(f"Current data type: {df[second_col].dtype}")
                 
+                # File selection for multiple files
+                selected_file_ids = []
+                if len(st.session_state.uploaded_files) > 1:
+                    st.write("### Select Files for Duplicate Detection")
+                    file_options = {file_id: file_info['name'] for file_id, file_info in st.session_state.uploaded_files.items()}
+                    
+                    selected_file_ids = st.multiselect(
+                        "Select files to check for duplicates:",
+                        options=list(file_options.keys()),
+                        default=list(file_options.keys()),
+                        format_func=lambda x: file_options[x],
+                        key="duplicate_file_selector"
+                    )
+                else:
+                    # If only one file, pre-select it
+                    selected_file_ids = [st.session_state.active_file_id] if st.session_state.active_file_id else []
+                
+                # Show all files with their columns for reference
+                if len(st.session_state.uploaded_files) > 1:
+                    with st.expander("View columns in all files"):
+                        for file_id, file_info in st.session_state.uploaded_files.items():
+                            st.write(f"**{file_info['name']}**")
+                            st.write(f"Columns: {', '.join(file_info['content'].columns.tolist())}")
+                            st.write("---")
+                
                 # Let user select similarity threshold
                 threshold = st.select_slider(
                     "Similarity Threshold:",
@@ -145,9 +110,41 @@ class AppDuplicateDetector:
                 # Execute button
                 detect_button = st.button("Detect Duplicates", key="detect_duplicates_button")
                 
+                # Create column mapping template button for multiple files
+                if len(st.session_state.uploaded_files) > 1:
+                    if st.button("Generate Column Mapping Template", key="generate_mapping_template"):
+                        # Get all unique columns across files
+                        all_columns = set()
+                        for file_id, file_info in st.session_state.uploaded_files.items():
+                            all_columns.update(file_info['content'].columns)
+                        
+                        # Create template with columns needed for duplicate detection highlighted
+                        template_df = pd.DataFrame(columns=['old_column_name', 'new_column_name'])
+                        
+                        # Add suggested mappings for common columns
+                        for col in sorted(list(all_columns)):
+                            template_df = pd.concat([template_df, pd.DataFrame({
+                                'old_column_name': [col],
+                                'new_column_name': [first_col if col.lower() == first_col.lower() or 'first' in col.lower() or 'fname' in col.lower() else 
+                                                second_col if col.lower() == second_col.lower() or 'last' in col.lower() or 'lname' in col.lower() else 
+                                                col]
+                            })], ignore_index=True)
+                        
+                        # Convert to CSV for download
+                        csv = template_df.to_csv(index=False)
+                        
+                        # Provide download button
+                        st.download_button(
+                            label="Download Template CSV",
+                            data=csv,
+                            file_name="column_mapping_template.csv",
+                            mime="text/csv",
+                            key="download_mapping_template"
+                        )
+                
                 return first_col, second_col, threshold, convert_to_string, detect_button, selected_file_ids
             else:
-                st.warning("No files loaded. Please upload files first.")
+                st.warning("No data loaded. Please upload a file first.")
         
         return None, None, None, False, False, []
     

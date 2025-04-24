@@ -147,7 +147,11 @@ class AppFileManager:
     def render_transformation_preview():
         """Render the column transformation results preview."""
         if st.session_state.show_transformation_preview and st.session_state.transformed_df is not None:
-            st.subheader("Column Transformation")
+            # Check if triggered by duplicate detection
+            triggered_by_duplicate = st.session_state.get('column_transform_triggered_by_duplicate', False)
+            
+            title = "Column Transformation" if not triggered_by_duplicate else "Column Standardization for Duplicate Detection"
+            st.subheader(title)
             
             # Show a before/after comparison
             col1, col2 = st.columns(2)
@@ -172,31 +176,78 @@ class AppFileManager:
             if st.session_state.transformation_report:
                 st.markdown(st.session_state.transformation_report)
             
-            # Export options
-            st.write("### Export Transformed Data")
-            export_format = st.selectbox(
-                "Select export format:",
-                options=["CSV", "XLSX (Excel)", "Parquet"],
-                index=0,
-                key="transform_export_format"
-            )
-            
-            export_path = st.text_input("Export path (including filename):", key="transform_export_path")
-            
-            # Map the display format to actual format
-            format_mapping = {
-                "CSV": "csv",
-                "XLSX (Excel)": "xlsx",
-                "Parquet": "parquet"
-            }
-            
-            export_button = st.button("Export Transformed Data", key="export_transform_button")
+            # Only show export options if not triggered by duplicate detection
+            if not triggered_by_duplicate:
+                # Export options
+                st.write("### Export Transformed Data")
+                export_format = st.selectbox(
+                    "Select export format:",
+                    options=["CSV", "XLSX (Excel)", "Parquet"],
+                    index=0,
+                    key="transform_export_format"
+                )
+                
+                export_path = st.text_input("Export path (including filename):", key="transform_export_path")
+                
+                # Map the display format to actual format
+                format_mapping = {
+                    "CSV": "csv",
+                    "XLSX (Excel)": "xlsx",
+                    "Parquet": "parquet"
+                }
+                
+                export_button = st.button("Export Transformed Data", key="export_transform_button")
+            else:
+                # If triggered by duplicate detection, show a different message and button
+                st.info("""
+                    Column names have been standardized for duplicate detection.
+                    You can now proceed with duplicate detection using these standardized columns.
+                """)
+                
+                # Continue button for duplicate detection
+                export_button = False
+                export_path = None
+                export_format = None
+                format_mapping = {}
+                
+                if st.button("Continue with Duplicate Detection", key="continue_duplicate_detection"):
+                    # Clear transformation preview flag
+                    st.session_state.show_transformation_preview = False
+                    
+                    # Update all files with transformed columns
+                    if st.session_state.active_file_id and st.session_state.active_file_id in st.session_state.uploaded_files:
+                        # Update the active file
+                        st.session_state.uploaded_files[st.session_state.active_file_id]['content'] = st.session_state.transformed_df
+                        
+                        # Get params for duplicate detection
+                        first_col = st.session_state.get('duplicate_first_col')
+                        second_col = st.session_state.get('duplicate_second_col')
+                        threshold = st.session_state.get('duplicate_threshold', 'medium')
+                        convert_to_string = st.session_state.get('duplicate_convert_to_string', True)
+                        
+                        # Get all DataFrames for combination
+                        dfs = []
+                        for file_id, file_info in st.session_state.uploaded_files.items():
+                            dfs.append(file_info['content'])
+                        
+                        # Combine all DataFrames
+                        combined_df = pd.concat(dfs, axis=0, ignore_index=True) if len(dfs) > 1 else dfs[0]
+                        
+                        # Set trigger flag for app controller to continue with duplicate detection
+                        st.session_state.continue_duplicate_detection = True
+                        st.session_state.combined_df_for_duplicates = combined_df
+                        st.rerun()
             
             # Option to close preview
             if st.button("Close Preview", key="close_transform_preview"):
                 st.session_state.show_transformation_preview = False
-                st.rerun()
                 
-            return export_path, format_mapping[export_format], export_button
+                # Also clear duplicate detection flags if present
+                if triggered_by_duplicate:
+                    st.session_state.column_transform_triggered_by_duplicate = False
+                
+                st.rerun()
+                    
+            return export_path, format_mapping.get(export_format, None) if export_format else None, export_button
         
         return None, None, False
