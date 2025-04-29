@@ -168,5 +168,8 @@ class AppColumnTransformer:
                 return mapping_file, transform_button, export_after_transform
             else:
                 st.warning("No data loaded. Please upload a file first.")
-            
-            return None, False, False
+                # Return default values
+                return None, False, False
+        
+        # Return default values when not showing column transform input
+        return None, False, False

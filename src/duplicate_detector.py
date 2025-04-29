@@ -40,6 +40,94 @@ class DuplicateDetector:
         self.max_levenshtein_distance = 2     # Maximum allowed character difference
         self.min_length_ratio = 0.7           # Minimum ratio of shorter name to longer name
         
+    def detect_duplicates_across_files(
+    self, 
+    dfs: List[pd.DataFrame],
+    first_col: str,
+    second_col: str,
+    threshold: str = 'medium',
+    convert_to_string: bool = True
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        """
+        Detect duplicate records across multiple DataFrames.
+        
+        Args:
+            dfs (List[DataFrame]): List of DataFrames to check for duplicates
+            first_col (str): First column name for comparison
+            second_col (str): Second column name for comparison
+            threshold (str): Similarity threshold level
+            convert_to_string (bool): Whether to convert columns to string
+            
+        Returns:
+            tuple: (DataFrame with duplicate groups, summary dictionary)
+        """
+        # Validate inputs
+        if not dfs:
+            return pd.DataFrame(), {
+                'total_records': 0,
+                'duplicate_groups': 0,
+                'total_duplicates': 0,
+                'percent_duplicates': 0.0,
+                'threshold_used': threshold,
+                'threshold_value': self.similarity_thresholds.get(threshold, self.similarity_thresholds['medium'])
+            }
+        
+        # To avoid duplicate column issues, only keep necessary columns from each DataFrame
+        processed_dfs = []
+        for i, df in enumerate(dfs):
+            # Keep only the columns we need for duplicate detection plus a few others as needed
+            # Create a list of columns to keep, ensuring no duplicates
+            cols_to_keep = []
+            
+            # Always include our primary comparison columns
+            if first_col in df.columns:
+                cols_to_keep.append(first_col)
+            if second_col in df.columns:
+                cols_to_keep.append(second_col)
+                
+            # Include a subset of other columns (limited to avoid duplicates)
+            # Get remaining columns, excluding the ones we already selected
+            remaining_cols = [col for col in df.columns if col not in cols_to_keep]
+            # Take up to 5 additional columns to avoid too many columns in the result
+            cols_to_keep.extend(remaining_cols[:5])
+            
+            # Create a subset DataFrame with only these columns
+            subset_df = df[cols_to_keep].copy()
+            
+            # Add a source file indicator
+            subset_df['_source_file'] = f"File_{i+1}"
+            
+            processed_dfs.append(subset_df)
+        
+        # Concatenate all processed DataFrames
+        combined_df = pd.concat(processed_dfs, axis=0, ignore_index=True)
+        
+        # Convert columns to string if specified
+        if convert_to_string:
+            if first_col in combined_df.columns:
+                combined_df[first_col] = combined_df[first_col].astype(str)
+            if second_col in combined_df.columns:
+                combined_df[second_col] = combined_df[second_col].astype(str)
+        
+        # Create a full name column for comparison
+        combined_df['full_name'] = combined_df.apply(
+            lambda row: self._combine_names(
+                str(row[first_col]).strip() if first_col in row and pd.notna(row[first_col]) else "",
+                str(row[second_col]).strip() if second_col in row and pd.notna(row[second_col]) else ""
+            ),
+            axis=1
+        )
+        
+        # Perform duplicate detection using the regular method
+        duplicate_df, summary = self.detect_name_duplicates(
+            combined_df,
+            first_col,  # Using as first_name_col
+            second_col, # Using as last_name_col 
+            threshold=threshold
+        )
+        
+        return duplicate_df, summary
+    
     def detect_name_duplicates(
         self, 
         df: pd.DataFrame,

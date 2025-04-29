@@ -198,45 +198,17 @@ class AppFileManager:
                 
                 export_button = st.button("Export Transformed Data", key="export_transform_button")
             else:
-                # If triggered by duplicate detection, show a different message and button
+                # If triggered by duplicate detection, show a different message
                 st.info("""
                     Column names have been standardized for duplicate detection.
-                    You can now proceed with duplicate detection using these standardized columns.
+                    Duplicate detection has been automatically performed with the standardized columns.
                 """)
                 
-                # Continue button for duplicate detection
+                # No export options for duplicate detection flow
                 export_button = False
                 export_path = None
                 export_format = None
                 format_mapping = {}
-                
-                if st.button("Continue with Duplicate Detection", key="continue_duplicate_detection"):
-                    # Clear transformation preview flag
-                    st.session_state.show_transformation_preview = False
-                    
-                    # Update all files with transformed columns
-                    if st.session_state.active_file_id and st.session_state.active_file_id in st.session_state.uploaded_files:
-                        # Update the active file
-                        st.session_state.uploaded_files[st.session_state.active_file_id]['content'] = st.session_state.transformed_df
-                        
-                        # Get params for duplicate detection
-                        first_col = st.session_state.get('duplicate_first_col')
-                        second_col = st.session_state.get('duplicate_second_col')
-                        threshold = st.session_state.get('duplicate_threshold', 'medium')
-                        convert_to_string = st.session_state.get('duplicate_convert_to_string', True)
-                        
-                        # Get all DataFrames for combination
-                        dfs = []
-                        for file_id, file_info in st.session_state.uploaded_files.items():
-                            dfs.append(file_info['content'])
-                        
-                        # Combine all DataFrames
-                        combined_df = pd.concat(dfs, axis=0, ignore_index=True) if len(dfs) > 1 else dfs[0]
-                        
-                        # Set trigger flag for app controller to continue with duplicate detection
-                        st.session_state.continue_duplicate_detection = True
-                        st.session_state.combined_df_for_duplicates = combined_df
-                        st.rerun()
             
             # Option to close preview
             if st.button("Close Preview", key="close_transform_preview"):
@@ -251,3 +223,4 @@ class AppFileManager:
             return export_path, format_mapping.get(export_format, None) if export_format else None, export_button
         
         return None, None, False
+        

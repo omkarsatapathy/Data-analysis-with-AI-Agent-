@@ -26,16 +26,80 @@ class AppDuplicateDetector:
                 df = st.session_state.file_content
             
             if df is not None:
-                # Display warning if multiple files with potentially different columns
+                # Check for column mismatches if multiple files are selected
                 if len(st.session_state.uploaded_files) > 1:
-                    st.info("""
-                        **Multiple files detected:** 
-                        When detecting duplicates across multiple files, ensure column names match.
-                        If column names differ, you'll be prompted to provide a mapping.
-                    """)
+                    # Collect column sets from each file
+                    column_sets = []
+                    file_options = {}
+                    
+                    for file_id, file_info in st.session_state.uploaded_files.items():
+                        column_sets.append((file_id, set(file_info['content'].columns)))
+                        file_options[file_id] = file_info['name']
+                    
+                    # Check for column mismatches
+                    has_mismatches = False
+                    mismatch_details = []
+                    
+                    # Get a unified set of all columns across files
+                    all_columns = set()
+                    for _, columns in column_sets:
+                        all_columns.update(columns)
+                    
+                    # Check each file for missing columns compared to the complete set
+                    for file_id, columns in column_sets:
+                        missing_columns = all_columns - columns
+                        if missing_columns:
+                            has_mismatches = True
+                            mismatch_details.append({
+                                'file': file_options[file_id],
+                                'missing': sorted(list(missing_columns))
+                            })
+                    
+                    # Display appropriate warning based on column mismatches
+                    if has_mismatches:
+                        st.warning("""
+                            ⚠️ **Column mismatches detected!** 
+                            The selected files have different column structures, which will cause problems 
+                            with duplicate detection. Please standardize column names before proceeding.
+                        """)
+                        
+                        # Show mismatch details
+                        with st.expander("View column mismatches", expanded=True):
+                            for mismatch in mismatch_details:
+                                st.write(f"**{mismatch['file']}** is missing columns: {', '.join(mismatch['missing'])}")
+                        
+                        # Offer direct column mapping
+                        if st.button("Standardize Columns", key="standardize_columns_button"):
+                            st.session_state.column_transform_triggered_by_duplicate = True
+                            st.session_state.show_column_transform_input = True
+                            st.rerun()
+                            return None, None, None, False, False, []
+                    else:
+                        st.success("""
+                            ✓ **Column structures match across files.** 
+                            All selected files have the same column names.
+                        """)
                 
                 # Let user specify if they want to convert all columns to string
                 convert_to_string = st.checkbox("Convert all columns to string before checking duplicates", value=True)
+                
+                # Let user select similarity threshold - MOVED THIS EARLIER in the function
+                threshold = st.select_slider(
+                    "Similarity Threshold:",
+                    options=["low", "medium", "high", "exact"],
+                    value="medium",
+                    key="similarity_threshold"
+                )
+                
+                # Explanation of thresholds
+                threshold_explanations = {
+                    "low": "More potential matches, higher chance of false positives",
+                    "medium": "Balanced approach, good for most datasets",
+                    "high": "Fewer matches, lower chance of false positives",
+                    "exact": "Only exact matches, no fuzzy matching"
+                }
+                
+                st.info(f"**{threshold.capitalize()}**: {threshold_explanations[threshold]}")
                 
                 # Let user select columns for comparison
                 col1, col2 = st.columns(2)
@@ -83,64 +147,59 @@ class AppDuplicateDetector:
                 
                 # Show all files with their columns for reference
                 if len(st.session_state.uploaded_files) > 1:
-                    with st.expander("View columns in all files"):
+                    with st.expander("View columns in all files", expanded=True):
                         for file_id, file_info in st.session_state.uploaded_files.items():
                             st.write(f"**{file_info['name']}**")
                             st.write(f"Columns: {', '.join(file_info['content'].columns.tolist())}")
                             st.write("---")
                 
-                # Let user select similarity threshold
-                threshold = st.select_slider(
-                    "Similarity Threshold:",
-                    options=["low", "medium", "high", "exact"],
-                    value="medium",
-                    key="similarity_threshold"
-                )
-                
-                # Explanation of thresholds
-                threshold_explanations = {
-                    "low": "More potential matches, higher chance of false positives",
-                    "medium": "Balanced approach, good for most datasets",
-                    "high": "Fewer matches, lower chance of false positives",
-                    "exact": "Only exact matches, no fuzzy matching"
-                }
-                
-                st.info(f"**{threshold.capitalize()}**: {threshold_explanations[threshold]}")
-                
-                # Execute button
-                detect_button = st.button("Detect Duplicates", key="detect_duplicates_button")
-                
-                # Create column mapping template button for multiple files
-                if len(st.session_state.uploaded_files) > 1:
-                    if st.button("Generate Column Mapping Template", key="generate_mapping_template"):
-                        # Get all unique columns across files
-                        all_columns = set()
-                        for file_id, file_info in st.session_state.uploaded_files.items():
-                            all_columns.update(file_info['content'].columns)
+                # Additional warning about selected columns if multiple files are chosen
+                if len(selected_file_ids) > 1 and (first_col or second_col):
+                    # Check if the selected columns exist in all selected files
+                    missing_in_files = []
+                    for file_id in selected_file_ids:
+                        if file_id in st.session_state.uploaded_files:
+                            file_df = st.session_state.uploaded_files[file_id]['content']
+                            file_name = st.session_state.uploaded_files[file_id]['name']
+                            
+                            missing_cols = []
+                            if first_col and first_col not in file_df.columns:
+                                missing_cols.append(first_col)
+                            if second_col and second_col not in file_df.columns:
+                                missing_cols.append(second_col)
+                                
+                            if missing_cols:
+                                missing_in_files.append((file_name, missing_cols))
+                    
+                    if missing_in_files:
+                        # Show warning about missing columns in some files
+                        warning_message = "⚠️ **Warning:** Selected columns missing in some files:\n"
+                        for file_name, missing_cols in missing_in_files:
+                            warning_message += f"- **{file_name}** missing: {', '.join(missing_cols)}\n"
+                        warning_message += "\nPlease standardize column names before proceeding."
                         
-                        # Create template with columns needed for duplicate detection highlighted
-                        template_df = pd.DataFrame(columns=['old_column_name', 'new_column_name'])
+                        st.warning(warning_message)
                         
-                        # Add suggested mappings for common columns
-                        for col in sorted(list(all_columns)):
-                            template_df = pd.concat([template_df, pd.DataFrame({
-                                'old_column_name': [col],
-                                'new_column_name': [first_col if col.lower() == first_col.lower() or 'first' in col.lower() or 'fname' in col.lower() else 
-                                                second_col if col.lower() == second_col.lower() or 'last' in col.lower() or 'lname' in col.lower() else 
-                                                col]
-                            })], ignore_index=True)
-                        
-                        # Convert to CSV for download
-                        csv = template_df.to_csv(index=False)
-                        
-                        # Provide download button
-                        st.download_button(
-                            label="Download Template CSV",
-                            data=csv,
-                            file_name="column_mapping_template.csv",
-                            mime="text/csv",
-                            key="download_mapping_template"
-                        )
+                        # Disable the detect button if columns are missing
+                        detect_button = st.button("Detect Duplicates", key="detect_duplicates_button", disabled=True)
+                        if st.button("Standardize Column Names Now", key="fix_columns_now"):
+                            # Store parameters for later - Now threshold is defined earlier!
+                            st.session_state.duplicate_first_col = first_col
+                            st.session_state.duplicate_second_col = second_col
+                            st.session_state.duplicate_threshold = threshold
+                            st.session_state.duplicate_convert_to_string = convert_to_string
+                            st.session_state.column_transform_triggered_by_duplicate = True
+                            
+                            # Redirect to column transformation
+                            st.session_state.show_column_transform_input = True
+                            st.rerun()
+                            return None, None, None, False, False, []
+                    else:
+                        # All good - the selected columns exist in all selected files
+                        detect_button = st.button("Detect Duplicates", key="detect_duplicates_button")
+                else:
+                    # Normal case - just show the detect button
+                    detect_button = st.button("Detect Duplicates", key="detect_duplicates_button")
                 
                 return first_col, second_col, threshold, convert_to_string, detect_button, selected_file_ids
             else:
@@ -180,6 +239,23 @@ class AppDuplicateDetector:
             for group_id in sorted(duplicate_df['duplicate_group'].unique()):
                 group_df = duplicate_df[duplicate_df['duplicate_group'] == group_id]
                 
+                # Ensure column names are unique before displaying
+                group_df_display = group_df.copy()
+                
+                # Check for duplicate columns and make them unique if needed
+                if group_df_display.columns.duplicated().any():
+                    # Create unique column names by adding suffixes
+                    cols = list(group_df_display.columns)
+                    col_counts = {}
+                    for i, col in enumerate(cols):
+                        if col in col_counts:
+                            col_counts[col] += 1
+                            cols[i] = f"{col}_{col_counts[col]}"
+                        else:
+                            col_counts[col] = 0
+                    
+                    group_df_display.columns = cols
+                
                 # Create a more descriptive header
                 if "_source_file" in group_df.columns:
                     file_count = group_df['_source_file'].nunique()
@@ -189,13 +265,13 @@ class AppDuplicateDetector:
                     header = f"Group {int(group_id)} ({len(group_df)} records)"
                 
                 with st.expander(header):
-                    st.dataframe(group_df)
+                    st.dataframe(group_df_display)       
             
             # Add download button
             if st.button("Download Duplicate Records", key="download_duplicates"):
                 # Generate a filename with timestamp
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"/Users/omkar/Downloads/duplicate_records_{timestamp}.csv"
+                filename = f"duplicate_records_{timestamp}.csv"
                 
                 # Save to CSV
                 duplicate_df.to_csv(filename, index=False)
@@ -241,11 +317,11 @@ class AppDuplicateDetector:
         col1, col2 = st.columns(2)
         with col1:
             first_col_target = st.text_input("Target name for first comparison column:", 
-                                            value="first_name", 
+                                            value="First name", 
                                             key="first_col_target")
         with col2:
             second_col_target = st.text_input("Target name for second comparison column:",
-                                            value="last_name",
+                                            value="Last name",
                                             key="second_col_target")
         
         # Create a mapping for each file

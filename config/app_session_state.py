@@ -50,6 +50,22 @@ class AppSessionState:
             st.session_state.show_duplicate_preview = False
         if "show_duplicate_settings" not in st.session_state:
             st.session_state.show_duplicate_settings = False
+
+        # New session states for improved column mismatch handling
+        if "column_transform_attempted" not in st.session_state:
+            st.session_state.column_transform_attempted = False
+        if "column_transform_triggered_by_duplicate" not in st.session_state:
+            st.session_state.column_transform_triggered_by_duplicate = False
+        if "duplicate_first_col" not in st.session_state:
+            st.session_state.duplicate_first_col = None
+        if "duplicate_second_col" not in st.session_state:
+            st.session_state.duplicate_second_col = None
+        if "duplicate_threshold" not in st.session_state:
+            st.session_state.duplicate_threshold = "medium"
+        if "duplicate_convert_to_string" not in st.session_state:
+            st.session_state.duplicate_convert_to_string = True
+        if "duplicate_selected_file_ids" not in st.session_state:
+            st.session_state.duplicate_selected_file_ids = []
         
         # New duplicate detection workflow states
         if "column_transform_triggered_by_duplicate" not in st.session_state:
@@ -79,10 +95,10 @@ class AppSessionState:
         if "show_pdf_url_input" not in st.session_state:
             st.session_state.show_pdf_url_input = False
 
-        if "continue_duplicate_detection" not in st.session_state:
-            st.session_state.continue_duplicate_detection = False
-        if "combined_df_for_duplicates" not in st.session_state:
-            st.session_state.combined_df_for_duplicates = None
+        # if "continue_duplicate_detection" not in st.session_state:
+        #     st.session_state.continue_duplicate_detection = False
+        # if "combined_df_for_duplicates" not in st.session_state:
+        #     st.session_state.combined_df_for_duplicates = None
         
         # Column transformation states
         if "show_column_transform_input" not in st.session_state:

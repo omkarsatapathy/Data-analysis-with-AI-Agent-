@@ -186,25 +186,61 @@ class AppController:
                 threshold = st.session_state.get('duplicate_threshold', 'medium')
                 convert_to_string = st.session_state.get('duplicate_convert_to_string', True)
                 
-                # Get all DataFrames for combination
-                dfs = []
-                for file_id, file_info in st.session_state.uploaded_files.items():
-                    dfs.append(file_info['content'])
+                # Now transform all other files using the same mapping
+                transformed_dfs = []
                 
-                # Combine into a single DataFrame
-                combined_df = pd.concat(dfs, axis=0, ignore_index=True) if len(dfs) > 1 else dfs[0]
+                if len(st.session_state.uploaded_files) > 1:
+                    for file_id, file_info in st.session_state.uploaded_files.items():
+                        file_df = file_info['content']
+                        # Transform this file's columns using the same mapping
+                        file_transformed_df, _ = ColumnTransformer.transform_columns(file_df, mapping_df)
+                        # Update the file in session state
+                        st.session_state.uploaded_files[file_id]['content'] = file_transformed_df
+                        # Add to the list of transformed DFs
+                        transformed_dfs.append(file_transformed_df)
+                else:
+                    # Only one file, add the already transformed DF
+                    transformed_dfs.append(transformed_df)
+                
+                # For preview purposes, store the transformed DF
+                st.session_state.transformed_df = transformed_df
+                st.session_state.transformation_report = report_text
                 
                 # Hide the column transformation input panel
                 st.session_state.show_column_transform_input = False
                 
-                # Proceed directly with duplicate detection
-                self.handle_duplicate_detection(
-                    combined_df,
+                # Create detector instance
+                detector = DuplicateDetector()
+                
+                # Use the new method to detect duplicates across all transformed files
+                duplicate_df, summary = detector.detect_duplicates_across_files(
+                    transformed_dfs,
                     first_col,
                     second_col,
                     threshold,
                     convert_to_string
                 )
+                
+                # Store the results and show preview
+                st.session_state.duplicate_results = duplicate_df
+                st.session_state.duplicate_summary = summary
+                
+                # Add to conversation
+                if not duplicate_df.empty:
+                    AppSessionState.add_assistant_message(
+                        f"I've standardized the column names and analyzed the data for duplicate records based on columns '{first_col}' and '{second_col}'.\n\n"
+                        f"Found {summary['total_duplicates']} potential duplicate records in {summary['duplicate_groups']} groups.\n\n"
+                        f"You can view the summary and download the results from the panel on the right."
+                    )
+                    
+                    # Show preview with download button
+                    st.session_state.show_duplicate_preview = True
+                else:
+                    AppSessionState.add_assistant_message(
+                        f"I've standardized the column names and analyzed the data for duplicate records based on columns '{first_col}' and '{second_col}', but no duplicates were found."
+                    )
+                
+                return True
             else:
                 # Normal transformation flow - show preview and export option
                 st.session_state.transformed_df = transformed_df
@@ -536,7 +572,7 @@ class AppController:
         AppSessionState.add_assistant_message(f"{report_title}{quality_report}")
         st.rerun()
     
-    def handle_duplicate_detection(self, df: pd.DataFrame, first_col: str, second_col: str, threshold: str = 'medium', convert_to_string: bool = True):
+    def handle_duplicate_detection(self, df: pd.DataFrame, first_col: str, second_col: str, threshold: str = 'medium', convert_to_string: bool = True, selected_file_ids: List[str] = None):
         """
         Handle duplicate record detection request.
         
@@ -546,117 +582,171 @@ class AppController:
             second_col (str): Second column name for comparison
             threshold (str): Similarity threshold level
             convert_to_string (bool): Whether to convert columns to string
+            selected_file_ids (List[str]): List of file IDs selected for duplicate detection
         """
         # Check if columns exist in the dataframe
-        if first_col not in df.columns or second_col not in df.columns:
-            # Check if we already attempted transformation (to avoid infinite loops)
-            if st.session_state.get('column_transform_attempted', False):
-                # Reset the flag
-                st.session_state.column_transform_attempted = False
-                
-                # Show error message
-                st.error(f"Columns '{first_col}' and/or '{second_col}' still not found after transformation.")
-                AppSessionState.add_assistant_message(
-                    f"I couldn't find the columns '{first_col}' and/or '{second_col}' even after column transformation. "
-                    f"Please ensure these columns exist in your data or choose different columns for duplicate detection."
-                )
-                return
+        if df is not None and (first_col not in df.columns or second_col not in df.columns):
+            st.error(f"Columns '{first_col}' and/or '{second_col}' not found in the active DataFrame.")
+            AppSessionState.add_assistant_message(
+                f"I couldn't find the columns '{first_col}' and/or '{second_col}' in your data. "
+                f"Please select different columns for duplicate detection."
+            )
+            return
         
-        # Check if we have multiple files and need to handle column mismatches
-        multiple_files = len(st.session_state.uploaded_files) > 1
+        # Check if multiple files are selected for duplicate detection
+        multiple_files = selected_file_ids and len(selected_file_ids) > 1
         
         if multiple_files:
-            # Check if columns exist in all files
-            all_columns_exist = True
+            # Collect all DataFrames and check for column existence
+            dfs = []
             missing_columns = {}
+            file_options = {}
             
-            for file_id, file_info in st.session_state.uploaded_files.items():
-                file_df = file_info['content']
-                if first_col not in file_df.columns or second_col not in file_df.columns:
-                    all_columns_exist = False
-                    missing_columns[file_id] = {
-                        'name': file_info['name'],
-                        'columns': [col for col in [first_col, second_col] if col not in file_df.columns]
-                    }
+            for file_id in selected_file_ids:
+                if file_id in st.session_state.uploaded_files:
+                    file_info = st.session_state.uploaded_files[file_id]
+                    file_df = file_info['content']
+                    file_name = file_info['name']
+                    file_options[file_id] = file_name
+                    
+                    # Check for missing columns
+                    missing_cols = []
+                    if first_col not in file_df.columns:
+                        missing_cols.append(first_col)
+                    if second_col not in file_df.columns:
+                        missing_cols.append(second_col)
+                    
+                    if missing_cols:
+                        missing_columns[file_id] = {
+                            'name': file_name,
+                            'columns': missing_cols
+                        }
+                    else:
+                        dfs.append(file_df)
             
-            # If we have missing columns, trigger column transformation
-            if not all_columns_exist:
-                # Set the transformation attempted flag to prevent infinite loops
+            # If we have missing columns, show column mapping interface
+            if missing_columns:
+                # Check if we already attempted transformation (to avoid infinite loops)
+                if st.session_state.get('column_transform_attempted', False):
+                    # Reset the flag and show error
+                    st.session_state.column_transform_attempted = False
+                    st.error(f"Columns '{first_col}' and/or '{second_col}' still not found after transformation.")
+                    AppSessionState.add_assistant_message(
+                        f"I couldn't find the columns '{first_col}' and/or '{second_col}' even after column transformation. "
+                        f"Please ensure these columns exist in your data or choose different columns."
+                    )
+                    return
+                
+                # Set the transformation attempted flag
                 st.session_state.column_transform_attempted = True
                 
-                # Store duplicate detection parameters for later use
+                # Store parameters for later use
                 st.session_state.duplicate_first_col = first_col
                 st.session_state.duplicate_second_col = second_col
                 st.session_state.duplicate_threshold = threshold
                 st.session_state.duplicate_convert_to_string = convert_to_string
-                
-                # Set flag to indicate transformation triggered by duplicate detection
-                st.session_state.column_transform_triggered_by_duplicate = True
-                
-                # Show column transformation interface
-                st.session_state.show_column_transform_input = True
+                st.session_state.duplicate_selected_file_ids = selected_file_ids
                 
                 # Add message about column mismatch
                 missing_files = [f"'{info['name']}' (missing: {', '.join(info['columns'])})" 
                                 for info in missing_columns.values()]
                 
                 AppSessionState.add_assistant_message(
-                    f"I've detected column name mismatches across your files. "
+                    f"I've detected column name mismatches across your selected files. "
                     f"Before we can detect duplicates, we need to standardize column names.\n\n"
                     f"The columns '{first_col}' and '{second_col}' are not present in all files. "
                     f"Missing in: {', '.join(missing_files)}.\n\n"
-                    f"Please upload a mapping file or use the template to map column names."
+                    f"Please standardize column names across your files."
                 )
                 
+                # Set flag to trigger column transformation
+                st.session_state.column_transform_triggered_by_duplicate = True
+                st.session_state.show_column_transform_input = True
+                st.rerun()
                 return
-        
-        # Reset the transformation attempted flag
-        st.session_state.column_transform_attempted = False
-        
-        # Create detector instance
-        detector = DuplicateDetector()
-        
-        # Perform duplicate detection
-        with st.spinner("Detecting duplicate records..."):
-            # Make a copy of the DataFrame to avoid modifying the original
-            df_copy = df.copy()
             
-            # Convert columns to string if specified
-            if convert_to_string:
-                df_copy[first_col] = df_copy[first_col].astype(str)
-                df_copy[second_col] = df_copy[second_col].astype(str)
+            # If we have no DataFrames to process, show error
+            if not dfs:
+                st.error("No valid files with the required columns were found.")
+                return
                 
-            # Perform duplicate detection
-            duplicate_df, summary = detector.detect_name_duplicates(
-                df_copy, 
-                first_col,  # Using as first_name_col
-                second_col, # Using as last_name_col 
-                threshold=threshold
-            )
-            
-            # Generate report
-            report = detector.generate_duplicate_report(duplicate_df, summary)
-            
-            # Store the results
-            st.session_state.duplicate_results = duplicate_df
-            st.session_state.duplicate_summary = summary
-            
-            # Add to conversation
-            if not duplicate_df.empty:
-                AppSessionState.add_assistant_message(
-                    f"I've analyzed the data for duplicate records based on columns '{first_col}' and '{second_col}'.\n\n"
-                    f"Found {summary['total_duplicates']} potential duplicate records in {summary['duplicate_groups']} groups.\n\n"
-                    f"You can view the summary and download the results from the panel on the right."
+            # Perform duplicate detection across files
+            with st.spinner("Detecting duplicate records..."):
+                detector = DuplicateDetector()
+                duplicate_df, summary = detector.detect_duplicates_across_files(
+                    dfs,
+                    first_col,
+                    second_col,
+                    threshold=threshold,
+                    convert_to_string=convert_to_string
                 )
                 
-                # Show preview with download button
-                st.session_state.show_duplicate_preview = True
-            else:
-                AppSessionState.add_assistant_message(
-                    f"I've analyzed the data for duplicate records based on columns '{first_col}' and '{second_col}', but no duplicates were found."
+                # Store the results
+                st.session_state.duplicate_results = duplicate_df
+                st.session_state.duplicate_summary = summary
+                
+                # Add to conversation
+                if not duplicate_df.empty:
+                    message = (
+                        f"I've analyzed the data for duplicate records based on columns '{first_col}' and '{second_col}'.\n\n"
+                        f"Found {summary['total_duplicates']} potential duplicate records in {summary['duplicate_groups']} groups."
+                    )
+                    
+                    message += f"\n\nThese duplicates were detected across {len(dfs)} files."
+                    message += "\n\nYou can view the summary and download the results from the panel on the right."
+                    
+                    AppSessionState.add_assistant_message(message)
+                    
+                    # Show preview with download button
+                    st.session_state.show_duplicate_preview = True
+                else:
+                    message = f"I've analyzed the data for duplicate records based on columns '{first_col}' and '{second_col}', but no duplicates were found."
+                    message += f" This analysis was performed across {len(dfs)} files."
+                        
+                    AppSessionState.add_assistant_message(message)
+        else:
+            # Single file duplicate detection
+            with st.spinner("Detecting duplicate records..."):
+                # Make a copy of the DataFrame to avoid modifying the original
+                df_copy = df.copy()
+                
+                # Convert columns to string if specified
+                if convert_to_string:
+                    df_copy[first_col] = df_copy[first_col].astype(str)
+                    df_copy[second_col] = df_copy[second_col].astype(str)
+                    
+                # Perform duplicate detection on a single DataFrame
+                detector = DuplicateDetector()
+                duplicate_df, summary = detector.detect_name_duplicates(
+                    df_copy, 
+                    first_col,
+                    second_col, 
+                    threshold=threshold
                 )
-            
-            st.rerun()
+                
+                # Store the results
+                st.session_state.duplicate_results = duplicate_df
+                st.session_state.duplicate_summary = summary
+                
+                # Add to conversation
+                if not duplicate_df.empty:
+                    message = (
+                        f"I've analyzed the data for duplicate records based on columns '{first_col}' and '{second_col}'.\n\n"
+                        f"Found {summary['total_duplicates']} potential duplicate records in {summary['duplicate_groups']} groups."
+                    )
+                    
+                    message += "\n\nYou can view the summary and download the results from the panel on the right."
+                    
+                    AppSessionState.add_assistant_message(message)
+                    
+                    # Show preview with download button
+                    st.session_state.show_duplicate_preview = True
+                else:
+                    message = f"I've analyzed the data for duplicate records based on columns '{first_col}' and '{second_col}', but no duplicates were found."
+                    
+                    AppSessionState.add_assistant_message(message)
+        
+        st.rerun()
     def handle_pdf_question(self, question: str):
         """
         Handle question about PDF content.
@@ -683,9 +773,6 @@ class AppController:
             AppSessionState.add_assistant_message(answer)
         
         st.rerun()
-    
-
-    
     def process_user_message(self, user_input: str):
         """
         Process user message and generate appropriate response.
@@ -1138,52 +1225,39 @@ class AppController:
             first_col, second_col, threshold, convert_to_string, detect_button, selected_file_ids = AppDuplicateDetector.render_duplicate_settings()
 
             if detect_button and first_col and second_col:
-                if selected_file_ids and len(selected_file_ids) > 0:
-                    dfs = []
-                    for file_id in selected_file_ids:
-                        if file_id in st.session_state.uploaded_files:
-                            dfs.append(st.session_state.uploaded_files[file_id]['content'])
-                    
-                    if dfs:
-                        if len(dfs) > 1:
-                            combined_df = pd.concat(dfs, axis=0, ignore_index=True)
-                        else:
-                            combined_df = dfs[0]
-                        
-                        self.handle_duplicate_detection(combined_df, first_col, second_col, threshold, convert_to_string)
-                elif st.session_state.active_file_id and st.session_state.active_file_id in st.session_state.uploaded_files:
-                    df = st.session_state.uploaded_files[st.session_state.active_file_id]['content']
-                    self.handle_duplicate_detection(df, first_col, second_col, threshold, convert_to_string)
+                # Get the active DataFrame for single file case
+                active_df = None
+                if st.session_state.active_file_id and st.session_state.active_file_id in st.session_state.uploaded_files:
+                    active_df = st.session_state.uploaded_files[st.session_state.active_file_id]['content']
                 elif st.session_state.file_content is not None:
-                    self.handle_duplicate_detection(st.session_state.file_content, first_col, second_col, threshold, convert_to_string)
-            
+                    active_df = st.session_state.file_content
+                
+                # Multiple files case - selected files from the UI
+                if selected_file_ids and len(selected_file_ids) > 0:
+                    # Pass only the file IDs to let handle_duplicate_detection manage the files
+                    self.handle_duplicate_detection(
+                        df=active_df,  # Pass active_df as a fallback
+                        first_col=first_col, 
+                        second_col=second_col, 
+                        threshold=threshold, 
+                        convert_to_string=convert_to_string,
+                        selected_file_ids=selected_file_ids
+                    )
+                # Single file case - active file
+                elif active_df is not None:
+                    self.handle_duplicate_detection(
+                        df=active_df,
+                        first_col=first_col, 
+                        second_col=second_col, 
+                        threshold=threshold, 
+                        convert_to_string=convert_to_string
+                    )
+
+
             # Handle export transformed data
             export_path, export_format, export_button = AppFileManager.render_transformation_preview()
             if export_button and export_path:
                 self.handle_export_request(export_path, export_format)
-            
-            # Check if we need to continue with duplicate detection after column transformation
-            if st.session_state.get('continue_duplicate_detection', False) and st.session_state.get('combined_df_for_duplicates') is not None:
-                # Get parameters for duplicate detection
-                first_col = st.session_state.get('duplicate_first_col')
-                second_col = st.session_state.get('duplicate_second_col')
-                threshold = st.session_state.get('duplicate_threshold', 'medium')
-                convert_to_string = st.session_state.get('duplicate_convert_to_string', True)
-                
-                # Reset flags
-                st.session_state.continue_duplicate_detection = False
-                combined_df = st.session_state.combined_df_for_duplicates
-                st.session_state.combined_df_for_duplicates = None
-                st.session_state.column_transform_triggered_by_duplicate = False
-                
-                # Perform duplicate detection on the combined dataframe
-                self.handle_duplicate_detection(
-                    combined_df,
-                    first_col,
-                    second_col,
-                    threshold,
-                    convert_to_string
-                )
             
             # Handle message form
             user_input, submit_button = AppUIManager.render_message_form()
