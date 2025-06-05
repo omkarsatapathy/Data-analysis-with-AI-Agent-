@@ -3,6 +3,7 @@ import pandas as pd
 import uuid
 import datetime
 from typing import Tuple, Dict, Any, Optional, List
+from src.file_export import FileExporter
 
 class AppDuplicateDetector:
     """
@@ -67,13 +68,6 @@ class AppDuplicateDetector:
                         with st.expander("View column mismatches", expanded=True):
                             for mismatch in mismatch_details:
                                 st.write(f"**{mismatch['file']}** is missing columns: {', '.join(mismatch['missing'])}")
-                        
-                        # Offer direct column mapping
-                        if st.button("Standardize Columns", key="standardize_columns_button"):
-                            st.session_state.column_transform_triggered_by_duplicate = True
-                            st.session_state.show_column_transform_input = True
-                            st.rerun()
-                            return None, None, None, False, False, []
                     else:
                         st.success("""
                             ✓ **Column structures match across files.** 
@@ -229,6 +223,7 @@ class AppDuplicateDetector:
             
             # Show file breakdown if _source_file column exists
             duplicate_df = st.session_state.duplicate_results
+            merged_df = st.session_state.merged_df
             if "_source_file" in duplicate_df.columns:
                 st.write("### Files containing duplicates:")
                 file_counts = duplicate_df['_source_file'].value_counts().reset_index()
@@ -267,30 +262,59 @@ class AppDuplicateDetector:
                 with st.expander(header):
                     st.dataframe(group_df_display)       
             
-            # Add download button
-            if st.button("Download Duplicate Records", key="download_duplicates"):
-                # Generate a filename with timestamp
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"duplicate_records_{timestamp}.csv"
+            column1, column2 = st.columns(2)
+            with column1:
+                # Add download button
+                if st.button("Download merged records without duplicates", key="download_merged"):
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"merged_records_{timestamp}.csv"
+                    
+                    # Save to CSV
+                    merged_df.to_csv(filename, index=False)
+                    
+                    # Add to generated files
+                    file_id = str(uuid.uuid4())
+                    st.session_state.generated_files[file_id] = {
+                        'name': f"merged_records_{timestamp}.csv",
+                        'path': filename,
+                        'type': 'csv'
+                    }
+                    
+                    st.success(f"File saved to {filename}")
+
+                file_path = st.text_input("Enter file path: ")
+                file_format = st.selectbox("Select file format: ", ["xlsx", "parquet", "csv"])
+                if st.button("Export now", key="export_merged_recors"):
+                    message, success = FileExporter.export_dataframe(merged_df, file_path, file_format)
+                    if success:
+                        st.success("File exported successfully")
+                    else:
+                        st.error(message)
+
+            with column2:
+                if st.button("Download Duplicate Records", key="download_duplicates"):
+                    # Generate a filename with timestamp
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"duplicate_records_{timestamp}.csv"
+                    
+                    # Save to CSV
+                    duplicate_df.to_csv(filename, index=False)
+                    
+                    # Add to generated files
+                    file_id = str(uuid.uuid4())
+                    st.session_state.generated_files[file_id] = {
+                        'name': f"duplicate_records_{timestamp}.csv",
+                        'path': filename,
+                        'type': 'csv'
+                    }
+                    
+                    st.success(f"File saved to {filename}")
                 
-                # Save to CSV
-                duplicate_df.to_csv(filename, index=False)
-                
-                # Add to generated files
-                file_id = str(uuid.uuid4())
-                st.session_state.generated_files[file_id] = {
-                    'name': f"duplicate_records_{timestamp}.csv",
-                    'path': filename,
-                    'type': 'csv'
-                }
-                
-                st.success(f"File saved to {filename}")
-            
-            # Option to close preview
-            if st.button("Close Preview", key="close_duplicate_preview"):
-                st.session_state.show_duplicate_preview = False
-                st.rerun()
-    
+                # Option to close preview
+                if st.button("Close Preview", key="close_duplicate_preview"):
+                    st.session_state.show_duplicate_preview = False
+                    st.rerun()
+        
 
     @staticmethod
     def render_duplicate_column_mapping(selected_file_ids, column_sets, file_options):

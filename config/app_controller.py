@@ -205,7 +205,11 @@ class AppController:
                 # For preview purposes, store the transformed DF
                 st.session_state.transformed_df = transformed_df
                 st.session_state.transformation_report = report_text
-                
+
+                # Merge the transformed dataframes into one while removing duplicates
+                merged_df = pd.concat(transformed_dfs).drop_duplicates().reset_index(drop=True)
+                st.session_state.merged_df = merged_df
+
                 # Hide the column transformation input panel
                 st.session_state.show_column_transform_input = False
                 
@@ -224,6 +228,9 @@ class AppController:
                 # Store the results and show preview
                 st.session_state.duplicate_results = duplicate_df
                 st.session_state.duplicate_summary = summary
+
+                merged_df = pd.concat(transformed_dfs).drop_duplicates().reset_index(drop=True)
+                st.session_state.merged_df = merged_df
                 
                 # Add to conversation
                 if not duplicate_df.empty:

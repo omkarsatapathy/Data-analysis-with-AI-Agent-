@@ -110,6 +110,9 @@ class AppSessionState:
         if "show_transformation_preview" not in st.session_state:
             st.session_state.show_transformation_preview = False
         
+        if "merged_df" not in st.session_state:
+            st.session_state.merged_df = None
+
         # Data operation states
         if "filtered_df" not in st.session_state:
             st.session_state.filtered_df = None
